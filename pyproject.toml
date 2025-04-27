@@ -1,0 +1,28 @@
+[project]
+name = "dagster_utils"
+version = "0.0.1"
+authors = [
+  { name="davidc789", email="davidchen1218@outlook.com" },
+]
+description = "A simple package that provides useful resources and functions when working with dagster"
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+dynamic = ["dependencies"]
+
+[project.urls]
+Homepage = "https://github.com/davidc789/flows"
+Issues = "https://github.com/davidc789/flows/issues"
+
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+optional-dependencies = {dev = { file = ["requirements-dev.txt"] }}

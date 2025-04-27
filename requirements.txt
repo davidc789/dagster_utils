@@ -1,0 +1,6 @@
+dagster
+dagster_shell
+geopandas
+pandas
+pydantic
+sqlalchemy
