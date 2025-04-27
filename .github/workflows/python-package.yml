@@ -35,3 +35,8 @@ jobs:
     - name: Building wheels
       run: |
         python -m build
+    - name: Upload distributions
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-dists-${{ matrix.python-version }}
+        path: dist/
