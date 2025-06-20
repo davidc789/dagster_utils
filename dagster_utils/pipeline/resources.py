@@ -1,5 +1,5 @@
 import re
-from typing import Sequence, Literal, Hashable, Any, Annotated
+from typing import Sequence, Literal, Hashable, Any, Annotated, Union, TypeVar
 
 import sqlalchemy
 from dagster import Config
@@ -134,15 +134,28 @@ class CsvReadOptions(Config):
     # dtype_backend: DtypeBackend | lib.NoDefault = Field(default=None)
 
 
-class CsvSource(Config):
+class CsvReadOptionsDuckdb(Config):
+    backend: Literal["duckdb"] = Field(default="duckdb", exclude=True)
+    sep: str | SkipJsonSchema[None] = Field(default=None)
+    delimiter: str | SkipJsonSchema[None] = Field(default=None)
+    header: int | Sequence[int] | Literal["infer"] | SkipJsonSchema[None] = Field(default=None)
+    names: Sequence[Hashable] | SkipJsonSchema[None] = Field(default=None)
+    chunksize: int | SkipJsonSchema[None] = Field(default=None)
+    encoding: str | SkipJsonSchema[None] = Field(default=None)
+
+
+CsvReadOptionsType = TypeVar("CsvReadOptionsType", CsvReadOptions, CsvReadOptionsDuckdb)
+
+class CsvSource[CsvReadOptionsType](Config):
     """ A wrapper of a CSV file using the pandas backend. """
     type: Literal["csv"] = "csv"
     path: str = Field(
         description="Path to the workbook.",
     )
-    read_options: CsvReadOptions = Field(
+    read_options: CsvReadOptionsType = Field(
         default_factory=CsvReadOptions,
         description="Options to pass to pandas backend.",
+        discriminator="backend",
     )
 
 
@@ -188,6 +201,50 @@ class ExcelSource(Config):
     read_options: ExcelReadOptions = Field(
         default_factory=ExcelReadOptions,
         description="Options to pass to pandas backend.",
+    )
+
+
+class ParquetReadOptions(Config):
+    backend: Literal["pandas"] = Field(default="pandas", exclude=True)
+
+
+class ParquetReadOptionsDuckdb(Config):
+    backend: Literal["duckdb"] = Field(default="duckdb", exclude=True)
+
+
+ParquetReadOptionsType = TypeVar("ParquetReadOptionsType", ParquetReadOptions, ParquetReadOptionsDuckdb)
+
+class ParquetSource[ParquetReadOptionsType](Config):
+    type: Literal["parquet"] = Field(default="parquet", exclude=True)
+    path: str = Field(
+        description="Path to the workbook.",
+    )
+    read_options: ParquetReadOptionsType = Field(
+        default_factory=ParquetReadOptions,
+        description="Options to pass to pandas backend.",
+        discriminator="backend",
+    )
+
+
+class JsonReadOptions(Config):
+    backend: Literal["pandas"] = Field(default="pandas", exclude=True)
+
+
+class JsonReadOptionsDuckdb(Config):
+    backend: Literal["duckdb"] = Field(default="duckdb", exclude=True)
+
+
+JsonReadOptionsType = TypeVar("JsonReadOptionsType", JsonReadOptions, JsonReadOptionsDuckdb)
+
+class JsonSource(Config):
+    type: Literal["json"] = Field(default="json", exclude=True)
+    path: str = Field(
+        description="Path to the workbook.",
+    )
+    read_options: JsonReadOptionsType = Field(
+        default_factory=JsonReadOptions,
+        description="Options to pass to pandas backend.",
+        discriminator="backend",
     )
 
 
@@ -284,31 +341,29 @@ class ComputeFnConfig(BaseModel):
     pass
 
 
-class ExtractLoadConfig(ComputeFnConfig):
-    source: Source
-    destination: Destination
-
-
-class SqlCopyFactory(ExtractLoadConfig):
+class SqlCopyFactory(ComputeFnConfig):
     compute_fn: Literal["sql_copy"] = "sql_copy"
     source: SqlSource
     destination: SqlDestination
 
 
-class CsvToSqlFactory(ExtractLoadConfig):
-    compute_fn: Literal["csv_to_sql"] = "csv_to_sql"
-    source: CsvSource | ExcelSource = Field(discriminator="type")
-    destination: SqlDestination
+class ReadFileFactory(ComputeFnConfig):
+    compute_fn: Literal["csv_to_sql"] = "read_file"
+    source: CsvSource | ExcelSource | JsonSource | ParquetSource = Field(discriminator="type")
+
+    def __call__(self, *args, **kwargs):
+       pass
 
 
-FactoryType = Annotated[CsvToSqlFactory | SqlCopyFactory, Field(discriminator="compute_fn")]
+FactoryType = Annotated[ReadFileFactory | SqlCopyFactory, Field(discriminator="compute_fn")]
 
 
 class ModelFile(BaseModel):
     name: str
     description: str
-    # This needs to be particular pipeline Configs
-    pipeline: list[FactoryType]
+    pipeline: list[FactoryType] = Field(
+        description="A list of steps to be performed by the asset."
+    )
     kinds: list[str] | None = None
     group_name: str | None = None
     key_prefix: CoercibleToAssetKeyPrefix | None = None
@@ -362,3 +417,83 @@ class Project(BaseModel):
         description="The paths to the macro files."
     )
     # models: ModelConfig
+
+
+class ArchiveTableOpConfig(Config):
+    tables: list[SqlTable] = Field(
+        description="A list of tables to archive.",
+    )
+    archive_schema: str | None = Field(
+        default=None,
+        description="Schema to archive the table. If not specified, the same schema will be used. "
+                    "In this case, it is recommended to add prefix or suffix to separate it from production tables.",
+    )
+    prefix: str = Field(
+        default="",
+        description="The prefix to prepend to the table names. Defaults to empty string.",
+    )
+    suffix: str = Field(
+        default="",
+        description="The suffix to append to the table names, before date and time stamps. Defaults to empty string.",
+    )
+    datestamp: bool = Field(
+        default=True,
+        description="Whether to add datestamps in the format of _YYYYMMDD to the table names.",
+    )
+    timestamp: bool = Field(
+        default=True,
+        description="Whether to add timestamps in the format of _HHMMSS to the table names.",
+    )
+
+
+class DumpTableToExcel(Config):
+    format: Literal["xlsx"] = Field(
+        default="xlsx",
+    )
+    method: Literal["multi"] | None = Field(
+        None,
+        description="Method of insertion.",
+    )
+    file_name: str = Field(
+        description="Path to the excel file.",
+    )
+    sql_tables: SqlTable | list[SqlTable] = Field(
+        description="The table to read from.",
+    )
+    chunksize: int = Field(
+        200000,
+        description="Size of each chunk. A lower number improves memory efficiency while a higher number improves performance.",
+    )
+    args: dict[str, Any] = Field(
+        default_factory=lambda: {},
+        description=".",
+    )
+
+
+class DumpTableToCsv(Config):
+    format: Literal["csv"] = Field(
+        default="csv"
+    )
+    method: Literal["pandas"] = Field(
+        description="Backend tool to run the insertion.",
+    )
+    file_name: str = Field(
+        description="Path to the csv file.",
+    )
+    sql_tables: SqlTable = Field(
+        description="The table to read from."
+    )
+    chunksize: int = Field(
+        200000,
+        description="Size of each chunk. A lower number improves memory efficiency while a higher number improves performance.",
+    )
+    args: dict[str, Any] = Field(
+        default_factory=lambda: {},
+        description=".",
+    )
+
+
+class DumpTableOpConfig(Config):
+    tables: list[Annotated[Union[DumpTableToCsv, DumpTableToExcel], Field(discriminator="format")]] = Field(
+        description="A list of tables to dump",
+    )
