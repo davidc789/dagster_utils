@@ -8,7 +8,7 @@ from dagster_shell.ops import ShellOpConfig, OutputType
 from sqlalchemy import text
 
 from .resources import SqlConnectionResource, SqlTable, ArchiveTableOpConfig, PrepareDevOpConfig
-from .utils import add_date_time_stamps_to_suffix
+from dagster_utils.utils import add_date_time_stamps_to_suffix
 
 
 @op

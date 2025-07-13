@@ -6,23 +6,36 @@ authors = [
 ]
 description = "A simple package that provides useful resources and functions when working with dagster"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
 license = "MIT"
 license-files = ["LICEN[CS]E*"]
-dynamic = ["dependencies"]
+dependencies = [
+    "cloudpickle>=3.1.1",
+    "dagster>=1.10.21",
+    "pandas>=2.3.0",
+    "pydantic>=2.11.7",
+    "sqlalchemy>=2.0.41",
+]
 
 [project.urls]
 Homepage = "https://github.com/davidc789/flows"
 Issues = "https://github.com/davidc789/flows/issues"
 
-[build-system]
-requires = ["setuptools >= 77.0.3"]
-build-backend = "setuptools.build_meta"
+#[build-system]
+#requires = ["setuptools >= 77.0.3"]
+#build-backend = "setuptools.build_meta"
+#
+#[tool.setuptools]
+#package-dir = {"": "dagster_utils"}
 
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
-optional-dependencies = {dev = { file = ["requirements-dev.txt"] }}
+[dependency-groups]
+dev = [
+    "build>=1.2.2.post1",
+    "dagster-webserver>=1.10.21",
+    "pandas-stubs>=2.2.3.250527",
+    "pytest>=8.4.1",
+]

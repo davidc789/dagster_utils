@@ -1,0 +1,40 @@
+sources:
+  - name: jaffle_shop
+#    prefix: default
+    type: csv
+    path: 'https://github.com/dbt-labs/jaffle-shop/blob/main/seeds/jaffle-data/raw_customers.csv'
+
+model:
+  - name: jaffle_shop_customers
+    description: ''
+    resources:
+      - conn_info
+    deps:
+      - jaffle_shop
+    destination:
+      sql_table:
+        schema: public
+        name: jaffle_shop
+      conn_info: conn_info
+
+  - name: jaffle_shop_aggregate
+    description: ''
+    resources:
+      - conn_info
+    deps:
+      - conn_info
+    pipeline:
+      - name: run_sql
+        sql: |
+          with jaffle_shop_aggregate as (
+            select * 
+              from jaffle_shop
+          )
+          
+          select * from jaffle_shop_aggregate+
+
+      - name: to_sql
+
+resources:
+  - conn_info:
+      database: ""

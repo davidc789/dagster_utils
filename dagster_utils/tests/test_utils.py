@@ -1,4 +1,4 @@
-from ..utils import cleanse_obj_name
+from dagster_utils.utils import cleanse_obj_name
 
 class TestCleanseObjName:
     def test_cleanse_obj_name_should_remove_caps(self):
