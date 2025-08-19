@@ -87,6 +87,7 @@ class MetaDataResource(ConfigurableResource):
         title="Info",
         description="Additional information passed onto the table API.",
     )
+    # naming_convention
 
     _metadata: MetaData | None = PrivateAttr(None)
 

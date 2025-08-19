@@ -1,0 +1,14 @@
+eerp:
+  target: prod
+  outputs:
+    prod:
+      resources:
+        - conn_info:
+            database: ""
+    dev:
+      resources:
+        - conn_info:
+
+
+
+            database:

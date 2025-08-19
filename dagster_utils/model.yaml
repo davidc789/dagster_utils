@@ -1,22 +1,46 @@
+# Sources are converted to observable sources.
 sources:
   - name: jaffle_shop
 #    prefix: default
     type: csv
     path: 'https://github.com/dbt-labs/jaffle-shop/blob/main/seeds/jaffle-data/raw_customers.csv'
+    config:
+      observe_method: hash | metadata
 
-model:
+# EL API
+el_models:
+  - name: jaffle_shop_customers
+    description: ''
+    resources:
+      - conn_info
+    source: jaffle_shop
+    destination:
+      type: sql
+      sql_table:
+        schema: public
+        name: jaffle_shop
+      conn_info: conn_info
+
+    # Optional specification of how the data should be moved, along with any configurations for the backend.
+    backend: pandas
+
+# Asset API
+asset_model:
   - name: jaffle_shop_customers
     description: ''
     resources:
       - conn_info
     deps:
       - jaffle_shop
-    destination:
-      sql_table:
-        schema: public
-        name: jaffle_shop
-      conn_info: conn_info
-
+    tasks:
+      - type: read_csv_to_df
+        # TODO: Consider dependency modelling
+        source: jaffle_shop
+      - type: write_df_to_sql
+        sql_table:
+          schema: public
+          name: jaffle_shop
+          conn_info: conn_info
   - name: jaffle_shop_aggregate
     description: ''
     resources:
@@ -30,11 +54,6 @@ model:
             select * 
               from jaffle_shop
           )
-          
+
           select * from jaffle_shop_aggregate+
-
       - name: to_sql
-
-resources:
-  - conn_info:
-      database: ""

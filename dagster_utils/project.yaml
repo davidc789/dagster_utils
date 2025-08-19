@@ -1,0 +1,4 @@
+eerp:
+  models:
+    +tags:
+      - eerp

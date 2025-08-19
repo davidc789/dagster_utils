@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+import dagster as dg
+
 
 class ModelFile(BaseModel):
     name: str
@@ -60,7 +62,3 @@ class Project(BaseModel):
         description="The paths to the macro files."
     )
     # models: ModelConfig
-
-
-def parse_model():
-    pass

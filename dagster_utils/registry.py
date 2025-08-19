@@ -1,14 +1,17 @@
 from collections.abc import MutableMapping
+from typing import Any, TypeVar
+
+_T = TypeVar('_T')
 
 
-class Registry(MutableMapping):
+class Registry[_T](MutableMapping):
     """ A registry for data sources. """
     def __init__(self, *args, **kwargs):
         self._registry = {}
 
-    def register(self, cls):
-        self._registry[cls.__name__] = cls
-        return cls
+    def register(self, name: str, obj: _T) -> None:
+        self._registry[name] = obj
+        return obj
 
     def __getitem__(self, key):
         return self._registry[key]

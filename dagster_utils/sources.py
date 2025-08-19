@@ -1,15 +1,17 @@
 import warnings
-from typing import Literal, Mapping, Any, ClassVar, Sequence, Hashable
+from typing import Literal, Any, ClassVar, Sequence, Hashable
 
 import dagster as dg
-import sqlalchemy.orm.decl_api
-from dagster import Config
+from dagster import Config, SourceAsset
+from dagster._core.definitions.decorators.source_asset_decorator import _ObservableSourceAsset
+from dagster._core.definitions.scoped_resources_builder import Resources
 from pydantic import BaseModel, Field
 from pydantic.json_schema import SkipJsonSchema
 
-from .pipeline import SqlTable
+from .pipeline import SqlTable, Destination
 from .registry import Registry
 from .serialise import file_hash, HashAlgorithm
+from .tasks import Task
 
 
 class SourceReadConfig(BaseModel):
@@ -33,12 +35,11 @@ class Source(BaseModel):
     # required_resource_keys: AbstractSet[str] | None = None
     # resource_defs: dict[str, ResourceDefinition] | None = None
     # partitions_def: PartitionsDefinition | None = None
-    automation_condition: AutomationCondition | None = None
+    # automation_condition: AutomationCondition | None = None
     op_tags: dict[str, Any] | None = None
     tags: dict[str, str] | None = None
-    config: SourceReadConfig
 
-    registry: ClassVar[Registry] = Registry()
+    registry: ClassVar[Registry["type[Source]"]] = Registry()
 
     def __init_subclass__(cls, **kw: Any) -> None:
         if cls.__dict__.get("registry") is not None:
@@ -48,7 +49,7 @@ class Source(BaseModel):
                 UserWarning,
             )
 
-        cls.registry.register(cls)
+        cls.registry.register(cls.__name__, cls)
         super().__init_subclass__(**kw)
 
 
@@ -62,7 +63,6 @@ class FileSource(Source):
 
 class CsvReadOptions(SourceReadConfig):
     _backend: str
-    backend: Literal["pandas"] = Field(default="pandas", exclude=True)
     sep: str | SkipJsonSchema[None] = Field(default=None)
     delimiter: str | SkipJsonSchema[None] = Field(default=None)
     header: int | Sequence[int] | Literal["infer"] | SkipJsonSchema[None] = Field(default=None)
@@ -179,6 +179,7 @@ class CsvSource(FileSource):
     path: str = Field(
         description="Path to the workbook.",
     )
+    backend: str | Literal["pandas", "duckdb"] = Field()
     read_options: CsvReadOptions = Field(
         default_factory=CsvReadOptions,
         description="Options to pass to pandas backend.",
@@ -298,18 +299,13 @@ def file_observer(file_path: str, method: Literal["content", "metadata"] = "cont
     return dg.DataVersion(file_hash(file_path, method, hash_algorithm))
 
 
-def parse_source(dct: dict[str, Any]) -> dg.SourceAsset:
-    object_hook: type[Source] = Source.registry.get(dct["type"])
-    if object_hook is None:
+def parse_el_model(dct: dict[str, Any]) -> _ObservableSourceAsset | SourceAsset:
+    source_object_hook: type[Source] = Source.registry.get(dct["type"])
+    if source_object_hook is None:
         raise ValueError(f"Source type must be specified.")
-    source_object = object_hook(**dct)
+    source_object = source_object_hook(**dct)
 
-    backend_end = source_object.registry.get(dct["backend"])
-    if backend_end is None:
-        raise ValueError(f"Source backend must be specified.")
 
-    source_object.backend
-    source_object.config
 
     return dg.observable_source_asset(
         name=source_object.name,
@@ -324,4 +320,24 @@ def parse_source(dct: dict[str, Any]) -> dg.SourceAsset:
         # automation_condition=source_object.automation_condition,
     )
 
-sqlalchemy.orm.DeclarativeBase
+
+def parse_resources(dct: dict[str, Any]) -> list[Resources]:
+    pass
+
+
+#     name: jaffle_shop_customers
+#     description: ''
+#     resources:
+#       - conn_info
+#     deps:
+#       - jaffle_shop
+#     tasks:
+#       - type: read_csv_to_df
+#         # TODO: Consider dependency modelling
+#         source:
+#           - jaffle_shop
+#       - type: write_df_to_sql
+#         sql_table:
+#           schema: public
+#           name: jaffle_shop
+#         conn_info: conn_info
