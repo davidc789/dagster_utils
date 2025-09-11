@@ -2,13 +2,11 @@ import shutil
 from pathlib import Path
 
 import pandas as pd
-from dagster import op, OpExecutionContext
-from dagster_shell import shell_op
-from dagster_shell.ops import ShellOpConfig, OutputType
+from dagster import op, OpExecutionContext, PipesSubprocessClient
 from sqlalchemy import text
 
 from .resources import SqlConnectionResource, SqlTable, ArchiveTableOpConfig, PrepareDevOpConfig
-from .utils import add_date_time_stamps_to_suffix
+from dagster_utils.utils import add_date_time_stamps_to_suffix
 
 
 @op
@@ -48,30 +46,23 @@ def archive_file(context: OpExecutionContext, file_path: str, archive_directory:
 
 
 @op
-def git_pull(context: OpExecutionContext, working_directory: str):
-    """ Pull any git repository updates.
-
-    :param context: Dagster Op execution context.
-    :param working_directory: Path to the working directory.
-    """
-    shell_op_config = ShellOpConfig(
-        env={},
-        output_logging=OutputType.STREAM,
-        cwd=working_directory,
-    )
-    shell_op(context, "git fetch origin", shell_op_config)
-    shell_op(context, "git pull origin master", shell_op_config)
+def git_fetch(context: OpExecutionContext, subprocess_client: PipesSubprocessClient):
+    yield subprocess_client.run(
+        command=["git", "fetch", "origin"],
+        context=context,
+    ).get_results()
 
 
 @op
-def deploy_scripts(context: OpExecutionContext, working_directory: str):
-    """ Deploys scripts to final location """
-    shell_op_config = ShellOpConfig(
-        env={},
-        output_logging=OutputType.STREAM,
-        cwd=working_directory,
-    )
-    shell_op(context, "echo 'Placeholder operation not actually implemented...'", shell_op_config)
+def git_pull(context: OpExecutionContext, subprocess_client: PipesSubprocessClient):
+    """ Pull any git repository updates.
+
+    :param context: Dagster Op execution context.
+    """
+    yield subprocess_client.run(
+        command=["git", "pull", "origin", "master"],
+        context=context,
+    ).get_results()
 
 
 @op
@@ -150,3 +141,10 @@ def run_sql_script(conn_info: SqlConnectionResource, script_path: str):
             query = query.strip()
             if query:
                 conn.execute(text(query))
+
+
+resources = {
+    "subprocess_client": PipesSubprocessClient(
+        cwd=".",
+    ),
+}
