@@ -474,6 +474,7 @@ def parse_task(dct: dict[str, Any]) -> Task:
     return task
 
 
+
 def parse_asset(dct: dict[str, Any]) -> dg.AssetAsset:
     for task_dict in dct["tasks"]:
         task = parse_task(task_dict)
@@ -483,8 +484,7 @@ def parse_asset(dct: dict[str, Any]) -> dg.AssetAsset:
     #     name: jaffle_shop_customers
     #     description: ''
     #     resources:
-    #       - conn_info
-    #     deps:
+    #       - conn_info\    #     deps:
     #       - jaffle_shop
     #     tasks:
     #       - type: read_csv_to_df

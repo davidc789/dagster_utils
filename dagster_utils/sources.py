@@ -14,6 +14,10 @@ from .serialise import file_hash, HashAlgorithm
 from .tasks import Task
 
 
+class DestinationWriteConfig(BaseModel):
+    pass
+
+
 class SourceReadConfig(BaseModel):
     pass
 
@@ -294,18 +298,61 @@ class SqlSource(Config):
     )
 
 
+class ElModel(BaseModel):
+    name: str
+    description: str | SkipJsonSchema[None] = None
+    resources: list[str]
+    source: str
+    destination: Destination
+    backend: str
+    read_config: SourceReadConfig
+    write_config: DestinationWriteConfig
+
+    #     - name: jaffle_shop_customers
+    #     description: ''
+    #     resources:
+    #     - conn_info
+    #
+    #
+    # source:
+    #   jaffle_shop
+    # destination:
+    #   type: sql
+    #   sql_table:
+    #     schema: public
+    #     name: jaffle_shop
+    #   conn_info: conn_info
+    #
+    # Optional specification of how the data should be moved, along with any configurations for the backend.
+    # backend: pandas
+    pass
+
+
 def file_observer(file_path: str, method: Literal["content", "metadata"] = "content",
                   hash_algorithm: HashAlgorithm = "md5") -> str:
     return dg.DataVersion(file_hash(file_path, method, hash_algorithm))
 
 
-def parse_el_model(dct: dict[str, Any]) -> _ObservableSourceAsset | SourceAsset:
+def parse_el_model(dct: dict[str, Any]) -> dg.Asset:
+    source = resolve_source(dct["source"])
+    destination = resolve_destination(dct["destination"])
+    backend = dct["backend"]
+
+    # description: ''
+    # source: jaffle_shop
+    # destination:
+    #   type: sql
+    #   sql_table:
+    #     schema: public
+    #     name: jaffle_shop
+    #     conn_info: conn_info
+
+
+def parse_source(dct: dict[str, Any]) -> _ObservableSourceAsset:
     source_object_hook: type[Source] = Source.registry.get(dct["type"])
     if source_object_hook is None:
         raise ValueError(f"Source type must be specified.")
     source_object = source_object_hook(**dct)
-
-
 
     return dg.observable_source_asset(
         name=source_object.name,

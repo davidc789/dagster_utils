@@ -40,7 +40,7 @@ asset_model:
         sql_table:
           schema: public
           name: jaffle_shop
-          conn_info: conn_info
+        conn_info: conn_info
   - name: jaffle_shop_aggregate
     description: ''
     resources:
