@@ -1,5 +1,5 @@
 import re
-from typing import Union, Any, Literal, Annotated, ClassVar
+from typing import TYPE_CHECKING
 
 import pandas as pd
 import sqlalchemy
@@ -8,6 +8,9 @@ from pydantic import Field, ConfigDict, PrivateAttr, model_validator, BaseModel
 from sqlalchemy import create_engine, Engine, MetaData
 from sqlalchemy.engine.url import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+if TYPE_CHECKING:
+    from typing import Union, Any, Literal, Annotated, ClassVar
 
 
 class SqlTable(Config):

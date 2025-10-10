@@ -16,6 +16,7 @@ license-files = ["LICEN[CS]E*"]
 dependencies = [
     "cloudpickle>=3.1.1",
     "dagster>=1.11.2",
+    "dagster-dg-cli>=1.11.13",
     "pandas>=2.3.1",
     "pydantic>=2.11.7",
     "sqlalchemy>=2.0.41",
@@ -24,6 +25,9 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/davidc789/flows"
 Issues = "https://github.com/davidc789/flows/issues"
+
+[project.entry-points]
+"dagster_dg_cli.registry_modules" = { dagster_utils = "dagster_utils.components"}
 
 #[build-system]
 #requires = ["setuptools >= 77.0.3"]
@@ -39,3 +43,10 @@ dev = [
     "pandas-stubs>=2.2.3.250527",
     "pytest>=8.4.1",
 ]
+
+[tool.dg]
+directory_type = "project"
+
+[tool.dg.project]
+root_module = "dagster_utils"
+code_location_target_module = "dagster_utils.definitions"
