@@ -503,8 +503,9 @@ class DumpTableOpConfig(dg.Model):
 class ELModel(dg.Model):
     """MODEL SUMMARY HERE."""
     description: str | None
-    source: Source
+    source: str
     destination: Destination
+    backend: str
     # description: ''
     # source: jaffle_shop
     # destination:

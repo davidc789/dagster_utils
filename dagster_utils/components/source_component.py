@@ -18,7 +18,6 @@ class Source(dg.Model, dg.Resolvable):
     """
     name: str
     type: str
-    backend: str
 
     registry: ClassVar[Registry["type[Source]"]] = Registry()
 
@@ -34,33 +33,13 @@ class Source(dg.Model, dg.Resolvable):
         super().__init_subclass__(**kw)
 
 
-def resolve_source(context: dg.ResolutionContext, source: dict):
+def resolve_source(context: dg.ResolutionContext, source: Source):
     source_object_hook: type[Source] = Source.registry.get(source["type"])
     if source_object_hook is None:
         raise ValueError(f"Source type must be specified.")
-    ca = context.resolve_value(source["config"], as_type=dict)
 
-    source_object = source_object_hook(**self.source.dict())
-
-
-if TYPE_CHECKING:
-    ResolvedSource = Annotated[
-        Source,
-        dg.Resolver(resolve_timestamp, model_field_type=dict),
-    ]
-
-
-def resolve_timestamp(
-    context: dg.ResolutionContext,
-    raw_timestamp: str,
-) -> datetime.datetime:
-    return datetime.datetime.fromisoformat(
-        context.resolve_value(raw_timestamp, as_type=str),
-    )
-
-
-# the yaml field will be a string, which is then parsed into a datetime object
-
+    source_object = source_object_hook(**context.resolve_value(source, as_type=Source).model_dump())
+    return source_object
 
 
 class SourceComponent(dg.Component, dg.Model, dg.Resolvable):
@@ -70,7 +49,10 @@ class SourceComponent(dg.Component, dg.Model, dg.Resolvable):
     """
 
     # added fields here will define params when instantiated in Python, and yaml schema via Resolvable
-    source: Source
+    source: Annotated[
+        Source,
+        dg.Resolver(resolve_source, model_field_type=Source),
+    ]
 
     def build_defs(self, context: dg.ComponentLoadContext) -> dg.Definitions:
         source_object_hook: type[Source] = Source.registry.get(self.source.type)
@@ -368,7 +350,3 @@ class ElModel(dg.Model, dg.Resolvable):
 def file_observer(file_path: str, method: Literal["content", "metadata"] = "content",
                   hash_algorithm: HashAlgorithm = "md5") -> str:
     return dg.DataVersion(file_hash(file_path, method, hash_algorithm))
-
-
-
-
