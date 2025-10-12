@@ -1,5 +1,7 @@
+import inspect
 import warnings
-from typing import Literal, Any, ClassVar, Sequence, Hashable
+from abc import ABC
+from typing import Literal, Any, ClassVar, Sequence, Hashable, TypeVar
 
 import dagster as dg
 from dagster import Config, SourceAsset
@@ -8,10 +10,19 @@ from dagster._core.definitions.scoped_resources_builder import Resources
 from pydantic import BaseModel, Field
 from pydantic.json_schema import SkipJsonSchema
 
-from .pipeline import SqlTable, Destination
-from .registry import Registry
-from .serialise import file_hash, HashAlgorithm
-from .tasks import Task
+from ..utils.registry import Registry
+from .serialisers import file_hash, HashAlgorithm
+
+from sqlalchemy.orm import DeclarativeBase
+
+_T = TypeVar("_T")
+
+
+class Target(BaseModel):
+    name: str
+    type: str
+
+    registry: ClassVar[Registry["type[Target]"]] = Registry()
 
 
 class DestinationWriteConfig(BaseModel):
@@ -22,7 +33,32 @@ class SourceReadConfig(BaseModel):
     pass
 
 
-class Source(BaseModel):
+class RegisterSubclass[_T](object):
+    registry: ClassVar[Registry[_T]]
+
+    def __init_subclass__(cls, **kw: Any) -> None:
+        if RegisterSubclass in cls.__bases__:
+            registry = cls.__dict__.get("registry", None)
+            if registry is not None:
+                if not isinstance(registry, Registry):
+                    raise AttributeError(
+                        "Base class has a 'registry' attribute that is "
+                        "not an instance of dagster_utils.utils.Registry"
+                    )
+            else:
+                registry = Registry()
+            cls.registry = registry
+
+        # ABCs do not need to be registered.
+        if inspect.isabstract(cls):
+            super().__init_subclass__(**kw)
+            return
+
+        Source.registry.register(cls.__name__, cls)
+        super().__init_subclass__(**kw)
+
+
+class Source(BaseModel, ABC):
     """ Base class for all sources.
 
     All sources should inherit from this class to ensure they are registered with the package registry.
@@ -30,22 +66,15 @@ class Source(BaseModel):
     name: str
     type: str
     backend: str
-    key_prefix: str | list[str]
-    description: str | None = None
-    group_name: str | None = None
-    # metadata: dict[str, MetadataValue | TableSchema | TableColumnLineage | AssetKey | PathLike | dict | float | int | list | str | datetime | None] | None = None
-    # io_manager_key: str | None = None
-    # io_manager_def: object | None = None
-    # required_resource_keys: AbstractSet[str] | None = None
-    # resource_defs: dict[str, ResourceDefinition] | None = None
-    # partitions_def: PartitionsDefinition | None = None
-    # automation_condition: AutomationCondition | None = None
-    op_tags: dict[str, Any] | None = None
-    tags: dict[str, str] | None = None
 
     registry: ClassVar[Registry["type[Source]"]] = Registry()
 
     def __init_subclass__(cls, **kw: Any) -> None:
+        # ABCs do not need to be registered.
+        if inspect.isabstract(cls):
+            super().__init_subclass__(**kw)
+            return
+
         if cls.__dict__.get("registry") is not None:
             warnings.warn(
                 f"The registry attribute on {cls.__name__} is used for internal purposes by the package."
@@ -53,11 +82,11 @@ class Source(BaseModel):
                 UserWarning,
             )
 
-        cls.registry.register(cls.__name__, cls)
+        super().registry.register(cls.__name__, cls)
         super().__init_subclass__(**kw)
 
 
-class FileSource(Source):
+class FileSource(Source, ABC):
     type: Literal["file"] = "file"
     path: str = Field(
         description="Path to the file.",
@@ -298,51 +327,6 @@ class SqlSource(Config):
     )
 
 
-class ElModel(BaseModel):
-    name: str
-    description: str | SkipJsonSchema[None] = None
-    resources: list[str]
-    source: str
-    destination: Destination
-    backend: str
-    read_config: SourceReadConfig
-    write_config: DestinationWriteConfig
-
-    #     - name: jaffle_shop_customers
-    #     description: ''
-    #     resources:
-    #     - conn_info
-    #
-    #
-    # source:
-    #   jaffle_shop
-    # destination:
-    #   type: sql
-    #   sql_table:
-    #     schema: public
-    #     name: jaffle_shop
-    #   conn_info: conn_info
-    #
-    # Optional specification of how the data should be moved, along with any configurations for the backend.
-    # backend: pandas
-    pass
-
-
 def file_observer(file_path: str, method: Literal["content", "metadata"] = "content",
                   hash_algorithm: HashAlgorithm = "md5") -> str:
     return dg.DataVersion(file_hash(file_path, method, hash_algorithm))
-
-
-def parse_el_model(dct: dict[str, Any]) -> dg.Asset:
-    source = resolve_source(dct["source"])
-    destination = resolve_destination(dct["destination"])
-    backend = dct["backend"]
-
-    # description: ''
-    # source: jaffle_shop
-    # destination:
-    #   type: sql
-    #   sql_table:
-    #     schema: public
-    #     name: jaffle_shop
-    #     conn_info: conn_info

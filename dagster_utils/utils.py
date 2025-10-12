@@ -3,16 +3,19 @@ import re
 import time
 from pathlib import Path
 from collections.abc import Collection
-from typing import Callable
+from typing import TYPE_CHECKING
 
 import dagster
 import pandas as pd
-import geopandas as gpd
+# import geopandas as gpd
 from dagster import AssetSpec, AssetsDefinition, MaterializeResult
 from sqlalchemy import String, text
 from sqlalchemy.sql.type_api import TypeEngine
 
-from .resources import SqlTable, SqlWriteConfig, SqlConnectionResource
+from .resources.connections import SqlTable, SqlWriteConfig, SqlConnectionResource
+
+if TYPE_CHECKING:
+    from typing import Callable
 
 PathLike = str | Path
 
@@ -255,26 +258,6 @@ class AssetCollection(Collection[AssetSpec | AssetsDefinition]):
 
     def __contains__(self, x, /):
         return x in self._assets
-
-
-def pands_to_sql_asset_factory(input_path: str, target_table: SqlTable):
-    """ Creates a simple EL pipeline that loads a pandas dataframe into a database.
-
-    :param input_path: Path to the input CSV file.
-    :param target_table: Target table in the database.
-    :return: Dagster AssetsDefinition.
-    """
-    def _wrapped_asset_definition(conn_info: SqlConnectionResource):
-        df = pd.read_excel(input_path)
-        df = cleanse_dataframe(df)
-        metadata = write_dataframe_to_sql(df, SqlWriteConfig(
-            sql_table=target_table,
-        ), conn_info)
-        return MaterializeResult(
-            metadata=metadata,
-        )
-
-    return _wrapped_asset_definition
 
 
 def sql_to_sql_asset_factory(source_table: SqlTable, target_table: SqlTable):

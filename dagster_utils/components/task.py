@@ -15,7 +15,7 @@ from sqlalchemy.sql.type_api import TypeEngine
 
 from .pipeline import SqlTable, SqlDestination, SqlConnectionResource, GlobalConfigResource, Source
 from .sources import CsvSource, ExcelSource, ParquetSource, JsonSource, CsvReadOptionsDuckdb, CsvReadOptionsPandas
-from .registry import Registry
+from ..utils import Registry
 
 
 class Timer(object):

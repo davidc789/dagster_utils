@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 
 import dagster as dg
 
-from .registry import Registry
+from ..utils import Registry
 from pydantic import Field
 
 if TYPE_CHECKING:

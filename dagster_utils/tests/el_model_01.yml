@@ -1,0 +1,9 @@
+source_connection:
+  type: local
+target_connection:
+  type: local
+models:
+  - source:
+      path: data/iris.csv
+    target:
+      path: data/iris_copy.csv

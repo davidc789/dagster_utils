@@ -1,13 +1,98 @@
-from typing import Union, Any, Literal, ClassVar
+import re
+import warnings
+from typing import TYPE_CHECKING
 
-import pandas as pd
+import sqlalchemy
 from dagster import Config, ConfigurableResource, InitResourceContext
 from pydantic import Field, ConfigDict, PrivateAttr, model_validator, BaseModel
 from sqlalchemy import create_engine, Engine, MetaData
 from sqlalchemy.engine.url import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from abc import ABC
 
-from pipeline import SqlTable
+from ..utils.registry import Registry
+
+if TYPE_CHECKING:
+    from typing import Union, Any, Literal, Annotated, ClassVar
+
+
+class ConnectionResource(ConfigurableResource, ABC):
+    """ A class to store connections. """
+    type: str
+
+    registry: ClassVar[Registry["type[ConnectionResource]"]] = Registry()
+
+    def __init_subclass__(cls, **kw: Any) -> None:
+        if cls.__dict__.get("registry") is not None:
+            warnings.warn(
+                f"The registry attribute on {cls.__name__} is used for internal purposes by the package."
+                "It is typically not recommended to override this attribute in subclasses.",
+                UserWarning,
+            )
+
+        cls.registry.register(cls.__name__, cls)
+        super().__init_subclass__(**kw)
+
+
+class SqlTable(Config):
+    """ A wrapper of sqlalchemy table in Dagster Config. """
+    name: str = Field(
+        default=None,
+        description="Name of table.",
+    )
+    schema: str | None = Field(
+        default=None,
+        description="Name of schema. For databases and warehouses with additional schema "
+                    "layers, include them all in the schema.",
+    )
+    schema_quoting: bool | None = Field(
+        default=None,
+        description="Whether to generate quotes around the schema name. "
+                    "By default, the quotes are automatically generated only if necessary."
+    )
+    name_quoting: bool | None = Field(
+        default=None,
+        description="Whether to generate quotes around the table name. "
+                    "By default, the quotes are automatically generated only if necessary."
+    )
+
+    def get_table_name(self) -> str:
+        """ A quick method to get formatted table names.
+
+        When SQLAlchemy syntax can be used, it should be preferred to generating names manually in this way since it
+        has limited capabilities.
+
+        :return: Parsed SQL table name.
+        """
+        # Check if the string is lower case, alphanumeric only. Otherwise, use quoting.
+        schema_quoting = _is_quoting_enabled(self.schema, self.schema_quoting, ignore_dot=True)
+        name_quoting = _is_quoting_enabled(self.name, self.name_quoting, ignore_dot=False)
+
+        # Schema quoting
+        if schema_quoting:
+            schema_str = f'"{self.schema}"'
+        else:
+            schema_str = f'{self.schema}'
+
+        # Name quoting only
+        if name_quoting:
+            name_str = f'"{self.name}"'
+        else:
+            name_str = f'{self.name}'
+
+        return f'{schema_str}.{name_str}'
+
+    def get_drop_sql(self, checkfirst: bool = True) -> sqlalchemy.sql.text:
+        """ A rough ANSI SQL implementation of table dropping.
+
+        :param checkfirst: Whether to check the existence of the table first.
+        :return: SQL code for dropping the table.
+        """
+        table_name = self.get_table_name()
+        if checkfirst:
+            return sqlalchemy.sql.text(f"""drop table if exists {table_name}""")
+        else:
+            return sqlalchemy.sql.text(f"""drop table {table_name}""")
 
 
 class MetaDataResource(ConfigurableResource):
@@ -26,6 +111,7 @@ class MetaDataResource(ConfigurableResource):
         title="Info",
         description="Additional information passed onto the table API.",
     )
+
     _metadata: MetaData | None = PrivateAttr(None)
 
     def setup_for_execution(self, context: InitResourceContext) -> None:
@@ -44,7 +130,7 @@ class MetaDataResource(ConfigurableResource):
         return self._metadata
 
 
-class ConnectionComponents(Config):
+class SqlConnectionComponents(Config):
     """ A dagster config wrapper of parameters to use to create a SQLAlchemy engine URL. Ported from prefect-sqlalchemy.
 
     :param driver: The driver name to use.
@@ -105,17 +191,16 @@ class ConnectionComponents(Config):
         )
 
 
-class SqlConnectionResource(ConfigurableResource):
+class SqlConnectionResource(ConnectionResource):
+    """ Specifies a SQL connection resource. """
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    type: Literal["sql"] = "sql"
     url: str | None = Field(
-        default=None,
-        description="SQLAlchemy URL to directly create the engine.",
-        deprecated="Passing url directly does not support advanced customisations. Please use ConnectionComponents instead."
+        default=None, deprecated="SQLAlchemy URL to create the engine"
     )
-    connection_info: ConnectionComponents | None = Field(
-        default=...,
-        description="SQLAlchemy engine URL connection components",
+    connection_info: SqlConnectionComponents | None = Field(
+        default=..., description="SQLAlchemy engine URL connection components",
     )
     create_engine_args: dict[str, Any] | None = Field(
         default_factory=lambda: {},
@@ -149,7 +234,7 @@ class SqlConnectionResource(ConfigurableResource):
     def setup_for_execution(self, context: InitResourceContext) -> None:
         """ Initializes the engine.
 
-        :param context: init context.
+        :param context: Init context.
         """
         super().setup_for_execution(context)
 
@@ -176,7 +261,7 @@ class SqlConnectionResource(ConfigurableResource):
     def teardown_after_execution(self, context: InitResourceContext) -> None:
         """ Closes sync connections and its cursors.
 
-        :param context: init context.
+        :param context: Init context.
         """
         super().teardown_after_execution(context)
 
@@ -198,170 +283,13 @@ class SqlConnectionResource(ConfigurableResource):
         return self._engine
 
 
-class DateOffsetConfig(Config):
-    _description_1: ClassVar[str] = "Parameters that add to the offset (like Timedelta)."
-    _description_2: ClassVar[str] = "Parameters that replace the offset value."
+class LocalConnectionResource(ConnectionResource):
+    """ Specifies a local connection resource. """
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    n: int = Field(
-        default=None,
-        description="The number of time periods the offset represents. If specified without a temporal pattern, defaults to n days.",
-    )
-    normalize: bool = Field(
-        default=None,
-        description="Whether to round the result of a DateOffset addition down to the previous midnight.",
-    )
-
-    years: float = Field(
-        default=None,
-        description=_description_1,
-    )
-    months: float = Field(
-        default=None,
-        description=_description_1,
-    )
-    weeks: float = Field(
-        default=None,
-        description=_description_1,
-    )
-    days: float = Field(
-        default=None,
-        description=_description_1,
-    )
-    hours: float = Field(
-        default=None,
-        description=_description_1,
-    )
-    minutes: float = Field(
-        default=None,
-        description=_description_1,
-    )
-    seconds: float = Field(
-        default=None,
-        description=_description_1,
-    )
-    milliseconds: float = Field(
-        default=None,
-        description=_description_1,
-    )
-    microseconds: float = Field(
-        default=None,
-        description=_description_1,
-    )
-    nanoseconds: float = Field(
-        default=None,
-        description=_description_1,
-    )
-
-    year: float = Field(
-        default=None,
-        description = _description_2
-    )
-    month: float = Field(
-        default=None,
-        description = _description_2
-    )
-    day: float = Field(
-        default=None,
-        description = _description_2
-    )
-    weekday: Literal[0, 1, 2, 3, 4, 5, 6] = Field(
-        default=None,
-        description=_description_2 + " A specific integer for the day of the week, 0 is Monday and 6 is Sunday."
-    )
-    hour: float = Field(
-        default=None,
-        description = _description_2
-    )
-    minute: float = Field(
-        default=None,
-        description = _description_2
-    )
-    second: float = Field(
-        default=None,
-        description = _description_2
-    )
-    microsecond: float = Field(
-        default=None,
-        description = _description_2
-    )
-    nanosecond: float = Field(
-        default=None,
-        description = _description_2
-    )
-
-    def get_dateoffset(self) -> pd.DateOffset:
-        return pd.DateOffset(**{k: v for k, v in self.model_dump().items() if v is not None})
-
-
-class LookForwardConfig(Config):
-    shortfall_table: SqlTable = Field(
-        description="SQL code for generating the shortfall table.",
-    )
-    unpaid_table: SqlTable = Field(
-        description="SQL code for generating the unpaid leave table.",
-    )
-    look_forward_offset: DateOffsetConfig = Field(
-        description="Look-forward offset.",
-    )
-    calculator_name: str = Field(
-        description="Name of the remediation calculator to display in the output.",
-    )
-    hour_tol: float = Field(
-        default=0.001,
-        description="Numeric tolerance for tiny hours",
-    )
-
-
-class PrepareDevOpConfig(Config):
-    selection_string: str = Field(
-        description="The dagster asset selection string to target in development.",
-    )
-    schema_suffix: str = Field(
-        default="_dev",
-        description="Schema suffix for the dev tables.",
-    )
-    name_suffix: str = Field(
-        default="",
-        description="Name suffix for the dev tables.",
-    )
-
-
-class KeepAwakeConfig(Config):
-    action_interval: float = Field(
-        default=60,
-        description="Interval in seconds to perform an action.",
-    )
-    run_duration: float = Field(
-        default=None,
-        description="Length of time to keep running. No run-time limit is set by default.",
-    )
-
-
-class GlobalConfigResource(ConfigurableResource):
-    target: str = Field(
-        description="Target profile name, similar to the target variable used by dbt.",
-    )
-    path: str = Field(
-        description="Path to code environment.",
-    )
-    data_path: str = Field(
-        description="Master path to where all data files are stored.",
-    )
-    download_path: str = Field(
-        default=r"C:\Users\L196049\Downloads",
-        description="Default path for ad-hoc downloads.",
-    )
-    schema_postfix: str = Field(
-        default="",
-        description="Postfix for database schemas to separate the profile with other ones.",
-    )
-    dev_scope: list[str] = Field(
-        default=None,
-        description="List of data models to use for development.",
-    )
-    ci_scope: list[str] = Field(
-        default=None,
-        description="List of data models to use for validation.",
+    type: Literal["local"] = "local"
+    url: str = Field(
+        default="file://%USERPROFILE%", description="The local path to the file."
     )
 
 
@@ -392,6 +320,18 @@ class _SyncDriver(BaseModel):
     MSSQL_PYODBC: str = "mssql+pyodbc"
     MSSQL_MXODBC: str = "mssql+mxodbc"
     MSSQL_PYMSSQL: str = "mssql+pymssql"
+
+
+def _is_quoting_enabled(qualifier: str, quoting: bool | None, ignore_dot=True):
+    if ignore_dot:
+        pattern = re.compile(r"^[a-z_][a-z0-9_.]*$")
+    else:
+        pattern = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+    if quoting is None:
+        return pattern.fullmatch(qualifier) is None
+
+    return quoting
 
 
 AsyncDriver = _AsyncDriver()
