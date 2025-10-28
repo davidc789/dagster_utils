@@ -1,97 +1,54 @@
-import inspect
-import warnings
 from abc import ABC
-from typing import Literal, Any, ClassVar, Sequence, Hashable, TypeVar
+from typing import Literal, Sequence, Hashable
 
 import dagster as dg
-from dagster import Config, SourceAsset
-from dagster._core.definitions.decorators.source_asset_decorator import _ObservableSourceAsset
-from dagster._core.definitions.scoped_resources_builder import Resources
-from pydantic import BaseModel, Field
+from pydantic import Field
 from pydantic.json_schema import SkipJsonSchema
 
-from ..utils.registry import Registry
-from .serialisers import file_hash, HashAlgorithm
-
-from sqlalchemy.orm import DeclarativeBase
-
-_T = TypeVar("_T")
+from dagster_utils.resources.abc import DataSpecResource, SourceReadConfig
+from dagster_utils.utils.hashing import HashAlgorithm, file_hash
 
 
-class Target(BaseModel):
-    name: str
-    type: str
-
-    registry: ClassVar[Registry["type[Target]"]] = Registry()
-
-
-class DestinationWriteConfig(BaseModel):
-    pass
-
-
-class SourceReadConfig(BaseModel):
-    pass
-
-
-class RegisterSubclass[_T](object):
-    registry: ClassVar[Registry[_T]]
-
-    def __init_subclass__(cls, **kw: Any) -> None:
-        if RegisterSubclass in cls.__bases__:
-            registry = cls.__dict__.get("registry", None)
-            if registry is not None:
-                if not isinstance(registry, Registry):
-                    raise AttributeError(
-                        "Base class has a 'registry' attribute that is "
-                        "not an instance of dagster_utils.utils.Registry"
-                    )
-            else:
-                registry = Registry()
-            cls.registry = registry
-
-        # ABCs do not need to be registered.
-        if inspect.isabstract(cls):
-            super().__init_subclass__(**kw)
-            return
-
-        Source.registry.register(cls.__name__, cls)
-        super().__init_subclass__(**kw)
-
-
-class Source(BaseModel, ABC):
-    """ Base class for all sources.
-
-    All sources should inherit from this class to ensure they are registered with the package registry.
-    """
-    name: str
-    type: str
-    backend: str
-
-    registry: ClassVar[Registry["type[Source]"]] = Registry()
-
-    def __init_subclass__(cls, **kw: Any) -> None:
-        # ABCs do not need to be registered.
-        if inspect.isabstract(cls):
-            super().__init_subclass__(**kw)
-            return
-
-        if cls.__dict__.get("registry") is not None:
-            warnings.warn(
-                f"The registry attribute on {cls.__name__} is used for internal purposes by the package."
-                "It is typically not recommended to override this attribute in subclasses.",
-                UserWarning,
-            )
-
-        super().registry.register(cls.__name__, cls)
-        super().__init_subclass__(**kw)
-
-
-class FileSource(Source, ABC):
+class FileSpecResource(DataSpecResource, ABC):
     type: Literal["file"] = "file"
     path: str = Field(
         description="Path to the file.",
     )
-    config: dict[str, Any] | None = None
+
+
+class ParquetSpec(FileSpecResource):
+    type: Literal["parquet"] = Field(default="parquet")
+    path: str = Field(
+        description="Path to the workbook.",
+    )
+
+
+class JsonSpec(FileSpecResource):
+    type: Literal["json"] = Field(default="json")
+    path: str = Field(
+        description="Path to the workbook.",
+    )
+
+
+class CsvSpec(FileSpecResource):
+    """ A wrapper of a CSV file using the pandas backend. """
+    type: Literal["csv"] = Field(default="csv")
+    path: str = Field(
+        description="Path to the workbook.",
+    )
+    backend: str | Literal["pandas", "duckdb"] = Field()
+
+
+class ExcelSpec(FileSpecResource):
+    """ A wrapper of an Excel table. """
+    type: Literal["excel"] = Field(default="excel")
+    path: str = Field(
+        description="Path to the workbook.",
+    )
+    sheet_name: str | int | None = Field(
+        default=None,
+        description="Name or index of the worksheet."
+    )
 
 
 class CsvReadOptions(SourceReadConfig):
@@ -206,20 +163,6 @@ class CsvReadOptionsDuckdb(CsvReadOptions):
     encoding: str | SkipJsonSchema[None] = Field(default=None)
 
 
-class CsvSource(FileSource):
-    """ A wrapper of a CSV file using the pandas backend. """
-    type: Literal["csv"] = "csv"
-    path: str = Field(
-        description="Path to the workbook.",
-    )
-    backend: str | Literal["pandas", "duckdb"] = Field()
-    read_options: CsvReadOptions = Field(
-        default_factory=CsvReadOptions,
-        description="Options to pass to pandas backend.",
-        discriminator="backend",
-    )
-
-
 class ExcelReadOptions(SourceReadConfig):
     backend: Literal["pandas"] = Field(default="pandas", exclude=True)
     header: int | Sequence[int] | SkipJsonSchema[None] = Field(default=None)
@@ -249,63 +192,23 @@ class ExcelReadOptions(SourceReadConfig):
     # engine_kwargs: dict | None = ...
 
 
-class ExcelSource(FileSource):
-    """ A wrapper of an Excel table. """
-    type: Literal["excel"] = Field(default="excel", exclude=True)
-    path: str = Field(
-        description="Path to the workbook.",
-    )
-    sheet_name: str | int | None = Field(
-        default=None,
-        description="Name or index of the worksheet."
-    )
-    read_options: ExcelReadOptions = Field(
-        default_factory=ExcelReadOptions,
-        description="Options to pass to pandas backend.",
-    )
-
-
-class ParquetReadOptions(Config):
+class ParquetReadOptions(SourceReadConfig):
     backend: Literal["pandas"] = Field(default="pandas", exclude=True)
 
 
-class ParquetReadOptionsDuckdb(Config):
+class ParquetReadOptionsDuckdb(SourceReadConfig):
     backend: Literal["duckdb"] = Field(default="duckdb", exclude=True)
 
 
-class ParquetSource(FileSource):
-    type: Literal["parquet"] = Field(default="parquet", exclude=True)
-    path: str = Field(
-        description="Path to the workbook.",
-    )
-    read_options: ParquetReadOptions = Field(
-        default_factory=ParquetReadOptions,
-        description="Options to pass to pandas backend.",
-        discriminator="backend",
-    )
-
-
-class JsonReadOptions(Config):
+class JsonReadOptions(SourceReadConfig):
     backend: Literal["pandas"] = Field(default="pandas", exclude=True)
 
 
-class JsonReadOptionsDuckdb(Config):
+class JsonReadOptionsDuckdb(SourceReadConfig):
     backend: Literal["duckdb"] = Field(default="duckdb", exclude=True)
 
 
-class JsonSource(FileSource):
-    type: Literal["json"] = Field(default="json", exclude=True)
-    path: str = Field(
-        description="Path to the workbook.",
-    )
-    read_options: JsonReadOptionsDuckdb = Field(
-        default_factory=JsonReadOptions,
-        description="Options to pass to pandas backend.",
-        discriminator="backend",
-    )
-
-
-class SqlTableReadOptions(Config):
+class SqlTableReadOptions(SourceReadConfig):
     backend: Literal["pandas", "sqlalchemy"] = "pandas"
     schema: str | SkipJsonSchema[None] = None
     index_col: str | list[str] | SkipJsonSchema[None] = None
@@ -314,17 +217,6 @@ class SqlTableReadOptions(Config):
     columns: list[str] | SkipJsonSchema[None] = None
     chunksize: int | SkipJsonSchema[None] = None
     # dtype_backend: DtypeBackend | lib.NoDefault = lib.no_default
-
-
-class SqlSource(Config):
-    type: Literal["sql"] = Field(default="sql", exclude=True)
-    sql_table: SqlTable = Field(
-        description="The source table to read from."
-    )
-    read_options: SqlTableReadOptions = Field(
-        default_factory=SqlTableReadOptions,
-        description="Options for reading.",
-    )
 
 
 def file_observer(file_path: str, method: Literal["content", "metadata"] = "content",

@@ -1,13 +1,20 @@
 # Ported from prefect.utilities.hashing, with dependency on prefect.serializers removed
 
 import hashlib
+import os
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
-from .. import pickle
+from pydantic import BaseModel
+
+from dagster_utils import pickle
 
 _md5 = partial(hashlib.md5, usedforsecurity=False)
+
+
+class HashAlgorithm(BaseModel):
+    pass
 
 
 class HashError(ValueError):
@@ -46,6 +53,12 @@ def file_hash(path: str, hash_algo: Callable[..., Any] = _md5) -> str:
     """
     contents = Path(path).read_bytes()
     return stable_hash(contents, hash_algo=hash_algo)
+
+
+def file_meta_hash(path: str, hash_algo: Callable[..., Any] = _md5) -> str:
+    """Given a path to a file, produces a stable hash of the file contents and file metadata."""
+    stats = os.stat(path)
+    return stable_hash(str((stats.st_mtime, stats.st_size)), hash_algo=hash_algo)
 
 
 def hash_objects(

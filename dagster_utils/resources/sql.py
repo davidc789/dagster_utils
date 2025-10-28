@@ -1,41 +1,19 @@
 import re
-import warnings
-from typing import TYPE_CHECKING
+from typing import Literal, Any
 
 import sqlalchemy
-from dagster import Config, ConfigurableResource, InitResourceContext
+from dagster import Config, InitResourceContext
 from pydantic import Field, ConfigDict, PrivateAttr, model_validator, BaseModel
-from sqlalchemy import create_engine, Engine, MetaData
-from sqlalchemy.engine.url import URL, make_url
+from sqlalchemy import URL, Engine, make_url, create_engine
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from abc import ABC
 
-from ..utils.registry import Registry
-
-if TYPE_CHECKING:
-    from typing import Union, Any, Literal, Annotated, ClassVar
+from . import DataSpecResource, ConnectionResource
+from .abc import DataResource, DataSpecResource
 
 
-class ConnectionResource(ConfigurableResource, ABC):
-    """ A class to store connections. """
-    type: str
-
-    registry: ClassVar[Registry["type[ConnectionResource]"]] = Registry()
-
-    def __init_subclass__(cls, **kw: Any) -> None:
-        if cls.__dict__.get("registry") is not None:
-            warnings.warn(
-                f"The registry attribute on {cls.__name__} is used for internal purposes by the package."
-                "It is typically not recommended to override this attribute in subclasses.",
-                UserWarning,
-            )
-
-        cls.registry.register(cls.__name__, cls)
-        super().__init_subclass__(**kw)
-
-
-class SqlTable(Config):
+class SqlRelationSpecResource(DataSpecResource):
     """ A wrapper of sqlalchemy table in Dagster Config. """
+    type: Literal["sql"] = Field(default="sql")
     name: str = Field(
         default=None,
         description="Name of table.",
@@ -82,7 +60,7 @@ class SqlTable(Config):
 
         return f'{schema_str}.{name_str}'
 
-    def get_drop_sql(self, checkfirst: bool = True) -> sqlalchemy.sql.text:
+    def get_drop_sql(self, checkfirst: bool = True) -> sqlalchemy.TextClause:
         """ A rough ANSI SQL implementation of table dropping.
 
         :param checkfirst: Whether to check the existence of the table first.
@@ -93,41 +71,6 @@ class SqlTable(Config):
             return sqlalchemy.sql.text(f"""drop table if exists {table_name}""")
         else:
             return sqlalchemy.sql.text(f"""drop table {table_name}""")
-
-
-class MetaDataResource(ConfigurableResource):
-    schema: str | None = Field(
-        default=None,
-        title="Schema",
-        description="The default schema to use.",
-    )
-    quote_schema: bool | None = Field(
-        default=None,
-        title="Qute Schema",
-        description="Whether to quote schema and table names for object in the metadata.",
-    )
-    info: dict | None = Field(
-        default=None,
-        title="Info",
-        description="Additional information passed onto the table API.",
-    )
-
-    _metadata: MetaData | None = PrivateAttr(None)
-
-    def setup_for_execution(self, context: InitResourceContext) -> None:
-        self._metadata = MetaData(schema=self.schema, quote_schema=self.quote_schema, info=self.info)
-
-    def teardown_after_execution(self, context: InitResourceContext) -> None:
-        super().teardown_after_execution(context)
-
-        if self._metadata is not None:
-            self._metadata = None
-
-    def get_metadata(self) -> MetaData:
-        if self._metadata is None:
-            raise ValueError("MetaData not initialised properly.")
-
-        return self._metadata
 
 
 class SqlConnectionComponents(Config):
@@ -270,7 +213,7 @@ class SqlConnectionResource(ConnectionResource):
             self._engine = None
             context.log.info("Disposed the engine.")
 
-    def get_engine(self) -> Union[Engine, AsyncEngine]:
+    def get_engine(self) -> Engine | AsyncEngine:
         """ Returns an authenticated engine that can be used to query from databases.
 
         Ported from prefect-sqlalchemy implementation. If an existing engine exists, return that one.
@@ -281,16 +224,6 @@ class SqlConnectionResource(ConnectionResource):
             raise ValueError("Engine not initialised properly.")
 
         return self._engine
-
-
-class LocalConnectionResource(ConnectionResource):
-    """ Specifies a local connection resource. """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    type: Literal["local"] = "local"
-    url: str = Field(
-        default="file://%USERPROFILE%", description="The local path to the file."
-    )
 
 
 class _AsyncDriver(BaseModel):
@@ -322,6 +255,19 @@ class _SyncDriver(BaseModel):
     MSSQL_PYMSSQL: str = "mssql+pymssql"
 
 
+class SqlDataResource(DataResource):
+    """ Specifies a SQL data resource. """
+    type: Literal["sql"] = "sql"
+    connection: SqlConnectionResource = Field(
+        default_factory=SqlConnectionResource, description="SQL connection resource"
+    )
+    spec: SqlRelationSpecResource
+
+
+AsyncDriver = _AsyncDriver()
+SyncDriver = _SyncDriver()
+
+
 def _is_quoting_enabled(qualifier: str, quoting: bool | None, ignore_dot=True):
     if ignore_dot:
         pattern = re.compile(r"^[a-z_][a-z0-9_.]*$")
@@ -332,7 +278,3 @@ def _is_quoting_enabled(qualifier: str, quoting: bool | None, ignore_dot=True):
         return pattern.fullmatch(qualifier) is None
 
     return quoting
-
-
-AsyncDriver = _AsyncDriver()
-SyncDriver = _SyncDriver()

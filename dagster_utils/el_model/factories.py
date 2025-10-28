@@ -12,11 +12,6 @@ from sqlalchemy.sql.type_api import TypeEngine
 from .resources import SqlTable, CsvSource, ExcelSource, SqlDestination, JsonSource, ParquetSource, CsvReadOptions, \
     CsvReadOptionsDuckdb, ParquetReadOptions, JsonReadOptions, ExcelReadOptions, JsonReadOptionsDuckdb, \
     ParquetReadOptionsDuckdb
-from pipeline.pipeline.sql_resources import SqlConnectionResource, GlobalConfigResource
-
-
-def parse_model():
-    pass
 
 
 def cleanse_obj_name(obj_name: str, ignore_dot: bool = False):
@@ -123,34 +118,9 @@ def write_dataframe_to_sql(df: pd.DataFrame, config: SqlDestination, conn_info: 
     }
 
 
-def copy_table(source_table: SqlTable, target_table: SqlTable, conn_info: SqlConnectionResource,
-               global_config: GlobalConfigResource):
-    """ Move SQL table within the same database. Returns standard metadata dictionary for convenience.
-
-    :param source_table: Source table.
-    :param target_table: Target table.
-    :param conn_info: Connection info.
-    """
-    engine = conn_info.get_engine()
-    with engine.connect() as conn:
-        # Source table is assumed to not require schema alteration.
-        source_table_clause = source_table.get_table_name()
-        target_table_clause = target_table.get_table_name(schema_postfix=global_config.schema_postfix)
-        conn.execute(text(f"""DROP TABLE IF EXISTS {target_table_clause}"""))
-        res = conn.execute(text(f"""SELECT * INTO {target_table_clause} FROM {source_table_clause}"""))
-        conn.commit()
-        return {
-            "dagster/row_count": res.rowcount,
-            "dagster/relation_identifier": target_table.get_table_name(schema_postfix=global_config.schema_postfix),
-        }
-
 PandasDataFrameTransform = Callable[[pd.DataFrame, AssetExecutionContext, GlobalConfigResource], pd.DataFrame]
 
 
-@overload
-def read_file(source: CsvSource[CsvReadOptions] | ExcelSource | JsonSource[JsonReadOptions] | ParquetSource[ParquetReadOptions]) -> pd.DataFrame: ...
-@overload
-def read_file(source: CsvSource[CsvReadOptionsDuckdb] | JsonSource[JsonReadOptionsDuckdb] | ParquetSource[ParquetReadOptionsDuckdb]) -> duckdb.DuckDBPyRelation: ...
 def read_file(source: CsvSource | ExcelSource | JsonSource | ParquetSource):
     def _wrapped_function(context: AssetExecutionContext, global_config: GlobalConfigResource):
         if isinstance(source, CsvSource):

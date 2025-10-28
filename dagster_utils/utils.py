@@ -12,7 +12,8 @@ from dagster import AssetSpec, AssetsDefinition, MaterializeResult
 from sqlalchemy import String, text
 from sqlalchemy.sql.type_api import TypeEngine
 
-from .resources.connections import SqlTable, SqlWriteConfig, SqlConnectionResource
+from .resources.abc import SqlTable, SqlWriteConfig
+from .resources.sql import SqlConnectionResource
 
 if TYPE_CHECKING:
     from typing import Callable

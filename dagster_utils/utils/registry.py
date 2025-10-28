@@ -1,19 +1,23 @@
 import inspect
 import warnings
-from typing import TYPE_CHECKING
+from typing import MutableMapping, TypeVar, Callable, TYPE_CHECKING, Hashable
 
 if TYPE_CHECKING:
-    from typing import MutableMapping, TypeVar
+    from typing import ClassVar
 
-_T = TypeVar("_T")
+from sqlalchemy.orm import DeclarativeBase
+
+_K = TypeVar("_K", bound=Hashable, default=str)
+_V = TypeVar("_V")
+__all__ = ["Registry", "RegisterSubclass"]
 
 
-class Registry(MutableMapping[str, _T]):
+class Registry(MutableMapping[_K, _V]):
     """ A generic registry for storing objects. """
-    def __init__(self, *args, **kwargs):
+    def __init__(self):
         self._registry = {}
 
-    def register(self, name: str, obj: _T) -> None:
+    def register(self, name: _K, obj: _V) -> None:
         if name in self._registry:
             raise ValueError(f"Name {name} is already registered against {self._registry[name]}.")
 
@@ -37,26 +41,63 @@ class Registry(MutableMapping[str, _T]):
 
 
 class RegisterSubclass(object):
-    """ A Mixin for tracking all subclasses. """
-    def __init_subclass__(cls, **kwargs):
-        # ABCs do not need to be registered.
-        if inspect.isabstract(cls):
-            super().__init_subclass__(**kwargs)
-            return
+    """ A Mixin for tracking all subclasses.
 
+    `registry` is reserved for tracking all subclasses.
+    `subclass_discriminator` can optionally be specified to change which class field to use as the subclass identifier.
+    If this value is not specified in a subclass, its class name will be used.
+    This value must be unique for each subclass.
+    """
+    if TYPE_CHECKING:
+        __name__: ClassVar[str]
 
-        # Setup the class as a base registry class
+        registry: ClassVar[Registry]
+
+    def __init_subclass__(cls, subclass_discriminator="type", **kwargs):
+        subclass_key = cls.__dict__.get(subclass_discriminator, cls.__name__)
+
+        # Ensure the integrity of the registry before proceeding.
+        if hasattr(cls, "registry") and not isinstance(cls.registry, Registry):
+            raise TypeError(f"The registry attribute on {cls.__name__} is not a valid instance of 'Registry'.")
+
+        # Set up the class as a base registry class
         if RegisterSubclass in cls.__bases__:
-            if cls.__dict__.get("registry") is not None:
-                raise warnings.warn(
+            if "registry" in cls.__dict__:
+                warnings.warn(
                     f"The registry attribute on {cls.__name__} is used for internal purposes by the package. "
                     "It is an advanced feature to override this attribute in subclasses and typically not recommended.",
                     UserWarning,
                 )
+            elif hasattr(cls, "registry"):
+                warnings.warn(
+                    f"{cls.__name__} is already a subclass of class with 'RegisterSubclass'. "
+                    f"The original registry will be overridden.",
+                    UserWarning,
+                )
             cls.registry = Registry()
-            cls._dagster_utils_base_class = cls
-        else:
-            cls._dagster_utils_base_class.registry.register(cls.__name__) = cls
-            super().registry.register(cls.__name__, cls)
+        elif not hasattr(cls, "registry"):
+            raise AttributeError(
+                f"{cls.__name__} is not a subclass of class with 'RegisterSubclass'. "
+                f"Please ensure the base class inherits from 'RegisterSubclass'.")
+        # All classes except ABCs are to be registered.
+        elif not inspect.isabstract(cls):
+            # Use the following code for debugging inheritance issues.
+            # cls._dagster_utils_base_class.registry.register(cls.__name__, cls)
+            cls.registry.register(subclass_key, cls)
+
         super().__init_subclass__(**kwargs)
-        print(f"{cls.__name__} is subclassing {cls.__dagster_utils_base_class__.__name__}")
+
+
+class RegisterDecorator(object):
+    """ A mixin for registering functions through decorator methods. """
+    registry: Registry
+
+    def __init__(self):
+        self.registry = Registry()
+
+    def register(self, fn: Callable | None = None, *args, **kwargs) -> Callable:
+        if fn is None:
+            return lambda _fn: self.register(_fn, *args, **kwargs)
+
+        self.registry.register(fn.__name__, fn)
+        return fn

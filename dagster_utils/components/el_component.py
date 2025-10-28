@@ -1,24 +1,18 @@
-from typing import Annotated, TYPE_CHECKING
+from typing import Annotated
 
 import dagster as dg
 
-from ..resources.connections import ConnectionResource
-from .source import Source, Target
+from ..resources.abc import ConnectionResource, DataSpecResource
+from ..el_model.el_model import ELModel, ELModelSpecResource
 
 
-def resolve_source(context: dg.ResolutionContext, source: Source):
-    source_object_hook: type[Source] = Source.registry.get(source["type"])
+def resolve_source_target(context: dg.ResolutionContext, source: DataSpecResource):
+    source_object_hook: type[DataSpecResource] = DataSpecResource.registry.get(source["type"])
     if source_object_hook is None:
         raise ValueError(f"Source type must be specified.")
 
-    source_object = source_object_hook(**context.resolve_value(source, as_type=Source).model_dump())
+    source_object = source_object_hook(**context.resolve_value(source, as_type=DataSpecResource).model_dump())
     return source_object
-
-
-def resolve_target(context: dg.ResolutionContext, target: Target):
-    target_object_hook: type[Target] = Target.registry.get(target["type"])
-    if target_object_hook is None:
-        raise ValueError(f"Target type must be specified.")
 
 
 def resolve_connection(
@@ -34,13 +28,9 @@ def resolve_connection(
 
 
 # the yaml field will be a string, which is then parsed into a datetime object
-ResolvedSource = Annotated[
-    Source,
-    dg.Resolver(resolve_source, model_field_type=dict),
-]
-ResolvedTarget = Annotated[
-    Target,
-    dg.Resolver(resolve_target, model_field_type=dict),
+ResolvedSourceTarget = Annotated[
+    DataSpecResource,
+    dg.Resolver(resolve_source_target, model_field_type=dict),
 ]
 ResolvedConnectionResource = Annotated[
     ConnectionResource,
@@ -49,8 +39,8 @@ ResolvedConnectionResource = Annotated[
 
 
 class ELModelSpec(dg.Model):
-    source: ResolvedSource
-    destination: ResolvedTarget
+    source: ResolvedSourceTarget
+    target: ResolvedSourceTarget
     backend: str | None = dg.Field(
         None,
         description="The backend to use for the operation.",
@@ -61,44 +51,9 @@ class Connections(dg.Model):
     source: ResolvedConnectionResource = dg.Field(
         description="The source connection to use."
     )
-    destination: ResolvedConnectionResource = dg.Field(
+    target: ResolvedConnectionResource = dg.Field(
         description="The destination connection to use."
     )
-    file_name: str = Field(
-        description="Path to the csv file.",
-    )
-    sql_tables: SqlTable = Field(
-        description="The table to read from."
-    )
-    chunksize: int = Field(
-        200000,
-        description="Size of each chunk. A lower number improves memory efficiency while a higher number improves performance.",
-    )
-    args: dict[str, Any] = Field(
-        default_factory=lambda: {},
-        description=".",
-    )
-
-
-class DumpTableOpConfig(dg.Model):
-    tables: list[Annotated[Union[DumpTableToCsv, DumpTableToExcel], Field(discriminator="format")]] = Field(
-        description="A list of tables to dump",
-    )
-
-
-class ELModel(dg.Model):
-    """MODEL SUMMARY HERE."""
-    description: str | None
-    source: Source
-    destination: Destination
-    # description: ''
-    # source: jaffle_shop
-    # destination:
-    #   type: sql
-    #   sql_table:
-    #     schema: public
-    #     name: jaffle_shop
-    #     conn_info: conn_info
 
 
 class ELComponent(dg.Component, dg.Model, dg.Resolvable):
@@ -113,16 +68,16 @@ class ELComponent(dg.Component, dg.Model, dg.Resolvable):
         _assets = []
 
         for model in self.el_models:
-            asset_key = f"{model.source.name}_to_{model.destination.name}".replace(".", "_")
+            asset_key = f"{model.source.name}_to_{model.target.name}".replace(".", "_")
 
-            el_function = ELModel.find(model.source.type, model.destination.type)
+            el_function = ELModel.find(model.source.type, model.target.type)
             asset = dg.asset(compute_fn=el_function, name=asset_key)
 
             _assets.append(asset)
 
         resources = {
-            "source_connection": self.connections.source,
-            "target_connection": self.connections.destination,
+            "el_model": self.connections.source,
+            "target_connection": self.connections.target,
         }
 
         return dg.Definitions(assets=_assets, resources=resources)

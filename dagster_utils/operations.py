@@ -5,7 +5,8 @@ import pandas as pd
 from dagster import op, OpExecutionContext, PipesSubprocessClient
 from sqlalchemy import text
 
-from .resources import SqlConnectionResource, SqlTable, ArchiveTableOpConfig, PrepareDevOpConfig
+from .resources import SqlTable, ArchiveTableOpConfig, PrepareDevOpConfig
+from .resources.sql import SqlConnectionResource
 from dagster_utils.utils import add_date_time_stamps_to_suffix
 
 
